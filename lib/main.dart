@@ -1,4 +1,9 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_app/asset_item.dart';
+import 'package:flutter_app/dao/asset_dao.dart';
+import 'package:flutter_app/database.dart';
+import 'package:flutter_app/percent_painter.dart';
 
 void main() => runApp(MyApp());
 
@@ -43,68 +48,134 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+  static const Color gray = Color(0xffbbbec3);
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  List<double> getPercents(Decimal totalUsd, List<AssetItem> assets) {
+    var list = assets.where((a) => Decimal.parse(a.balance).compareTo(Decimal.fromInt(0)) != 0)
+      .map((a) => double.parse((a.usd() / totalUsd).toStringAsFixed(2))).toList();
+    list.sort((d1, d2) => (d1 - d2).toInt());
+    var len = list.length;
+    if(len == 1) {
+      return [1];
+    } else if(len == 2) {
+      return [list[0], 1 - list[0]];
+    } else {
+      return [list[0], list[1], 1 - list[0] - list[1]];
+    }
+  }
+
+  ListTile buildListTile(BuildContext context, AssetItem asset) {
+    return ListTile(
+      leading: ExcludeSemantics(
+          child: CircleAvatar(backgroundImage: NetworkImage(asset.iconUrl))),
+      title: Text(asset.name),
+      subtitle: Text(asset.symbol),
+      trailing: Text(asset.changeBtc),
+    );
+  }
+
+  Widget buildHeader(BuildContext context, String btcValue, String usdValue, List<double> list) {
+    return Column(children: <Widget>[
+      SizedBox(
+        height: 50,
+      ),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          const Text(
+            "\$",
+            style: TextStyle(color: gray, fontSize: 14),
+          ),
+          SizedBox(
+            width: 4,
+          ),
+          Text(
+            usdValue,
+            style: TextStyle(
+                color: Colors.black, fontSize: 40, fontFamily: "mixin"),
+          )
+        ],
+      ),
+      SizedBox(
+        height: 16,
+      ),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Text(
+            btcValue,
+            style: TextStyle(
+                color: Color(0xff333333), fontSize: 18, fontFamily: "mixin"),
+          ),
+          SizedBox(
+            width: 8,
+          ),
+          const Text(
+            "BTC",
+            style: TextStyle(color: gray, fontSize: 14),
+          )
+        ],
+      ),
+      SizedBox(
+        height: 24,
+      ),
+      Container(
+        width: 300,
+        height: 2,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.all(Radius.circular(4)),
+          boxShadow: <BoxShadow> [
+            BoxShadow(
+              color: gray
+            )
+          ]
+        ),
+        child: CustomPaint(
+          painter: PercentPainter(list),
+        ),
+      ),
+      SizedBox(
+        height: 50,
+      ),
+    ]);
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        leading: Icon(Icons.arrow_back),
+        title: Text("Wallet"),
+        actions: <Widget>[Icon(Icons.menu)],
+        backgroundColor: Colors.blueAccent,
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Invoke "debug painting" (press "p" in the console, choose the
-          // "Toggle Debug Paint" action from the Flutter Inspector in Android
-          // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
-          // to see the wireframe for each widget.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.display1,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+      body: FutureBuilder<List<AssetItem>>(
+          future: AssetDao(DBProvider.db).assetItemsNotHidden(),
+          builder:
+              (BuildContext context, AsyncSnapshot<List<AssetItem>> assets) {
+            if (assets.hasData) {
+              var totalBtc = Decimal.fromInt(0);
+              var totalUsd = Decimal.fromInt(0);
+              assets.data.forEach((a) {
+                totalBtc += a.btc();
+                totalUsd += a.usd();
+              });
+              final btcValue = totalBtc.toStringAsFixed(8);
+              final usdValue = totalUsd.toStringAsFixed(2);
+
+              return ListView.builder(
+                  itemCount: assets.data.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    if (index == 0) {
+                      return buildHeader(context, btcValue, usdValue, getPercents(totalUsd, assets.data));
+                    } else {
+                      return buildListTile(context, assets.data[index - 1]);
+                    }
+                  });
+            } else {
+              return Center(child: CircularProgressIndicator());
+            }
+          }),
     );
   }
 }
